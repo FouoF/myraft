@@ -1,0 +1,25 @@
+/*protoc --go_out=. --go_opt=paths=source_relative --go-grpc_out=. --go-grpc_opt=paths=source_relative ./consistency/consistency.proto */
+
+syntax = "proto3";
+
+option go_package = "raft/consistency";
+
+package consistency;
+
+service consistency {
+  rpc sendconfigure (ConfigureRequest) returns (ConfigureResponse);
+}
+
+message node {
+  string ip = 2;
+  int32 port = 3;
+}
+
+message ConfigureRequest {
+  int32 nodenum = 1;
+  repeated node nodes = 2;
+}
+
+message ConfigureResponse {
+  bool success = 1;
+}
