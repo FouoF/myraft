@@ -2,7 +2,7 @@
 // versions:
 // - protoc-gen-go-grpc v1.2.0
 // - protoc             v4.25.2
-// source: consistency.proto
+// source: consistency/consistency.proto
 
 package consistency
 
@@ -23,6 +23,7 @@ const _ = grpc.SupportPackageIsVersion7
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type ConsistencyClient interface {
 	Sendconfigure(ctx context.Context, in *ConfigureRequest, opts ...grpc.CallOption) (*ConfigureResponse, error)
+	Sendheartbeat(ctx context.Context, in *HeartbeatRequest, opts ...grpc.CallOption) (*HeartbeatResponse, error)
 }
 
 type consistencyClient struct {
@@ -42,11 +43,21 @@ func (c *consistencyClient) Sendconfigure(ctx context.Context, in *ConfigureRequ
 	return out, nil
 }
 
+func (c *consistencyClient) Sendheartbeat(ctx context.Context, in *HeartbeatRequest, opts ...grpc.CallOption) (*HeartbeatResponse, error) {
+	out := new(HeartbeatResponse)
+	err := c.cc.Invoke(ctx, "/consistency.consistency/sendheartbeat", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // ConsistencyServer is the server API for Consistency service.
 // All implementations must embed UnimplementedConsistencyServer
 // for forward compatibility
 type ConsistencyServer interface {
 	Sendconfigure(context.Context, *ConfigureRequest) (*ConfigureResponse, error)
+	Sendheartbeat(context.Context, *HeartbeatRequest) (*HeartbeatResponse, error)
 	mustEmbedUnimplementedConsistencyServer()
 }
 
@@ -56,6 +67,9 @@ type UnimplementedConsistencyServer struct {
 
 func (UnimplementedConsistencyServer) Sendconfigure(context.Context, *ConfigureRequest) (*ConfigureResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Sendconfigure not implemented")
+}
+func (UnimplementedConsistencyServer) Sendheartbeat(context.Context, *HeartbeatRequest) (*HeartbeatResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method Sendheartbeat not implemented")
 }
 func (UnimplementedConsistencyServer) mustEmbedUnimplementedConsistencyServer() {}
 
@@ -88,6 +102,24 @@ func _Consistency_Sendconfigure_Handler(srv interface{}, ctx context.Context, de
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Consistency_Sendheartbeat_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(HeartbeatRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ConsistencyServer).Sendheartbeat(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/consistency.consistency/sendheartbeat",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ConsistencyServer).Sendheartbeat(ctx, req.(*HeartbeatRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Consistency_ServiceDesc is the grpc.ServiceDesc for Consistency service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -99,7 +131,11 @@ var Consistency_ServiceDesc = grpc.ServiceDesc{
 			MethodName: "sendconfigure",
 			Handler:    _Consistency_Sendconfigure_Handler,
 		},
+		{
+			MethodName: "sendheartbeat",
+			Handler:    _Consistency_Sendheartbeat_Handler,
+		},
 	},
 	Streams:  []grpc.StreamDesc{},
-	Metadata: "consistency.proto",
+	Metadata: "consistency/consistency.proto",
 }

@@ -15,17 +15,13 @@ var status Status = Unknow //当前节点的角色[Leader, Follower, Unknow]
 var config conf //配置信息
 var state State //当前节点的状态
 var logs []LogEntry //日志
-var thisNodeConfigureOK bool = false
-
-func GetThisNodeConfigureOK() bool {
-	return thisNodeConfigureOK
-}
 
 type Status int
 
 const (
 	Running Status = iota
 	Leader
+	Candidate
 	Follower
 	Unknow
 )
@@ -56,14 +52,8 @@ type conf struct{
 }
 
 type Nodestate struct{
-	conn *grpc.ClientConn
-	configed bool
-}
-
-func NewNodestate(confed bool) *Nodestate{
-	return &Nodestate{
-		configed: confed,
-	}
+	Conn *grpc.ClientConn
+	Configed bool
 }
 
 type StatesTable map[node]Nodestate
@@ -87,6 +77,14 @@ type State struct{
 	term int
 	commitIndex int
 	lastApplied int
+}
+
+func GetTerm() int {
+	return state.term
+}
+
+func SetTerm(pterm int) {
+	state.term = pterm
 }
 
 func GetInstance() *conf {
@@ -142,8 +140,8 @@ func InitStateTable() (error) {
 	return nil
 }
 func InitStub(addr node) (*grpc.ClientConn, error){
-	if (statesTable[addr].conn != nil) {
-		return statesTable[addr].conn, nil
+	if (statesTable[addr].Conn != nil) {
+		return statesTable[addr].Conn, nil
 	}
 	serverAddr := addr.Host + ":" + strconv.Itoa(addr.Port)
 	var opts []grpc.DialOption

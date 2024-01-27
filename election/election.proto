@@ -7,19 +7,5 @@ option go_package = "raft/election";
 package election;
 
 service election {
-  rpc sendconfigure (ConfigureRequest) returns (ConfigureResponse);
-}
-
-message node {
-  string ip = 2;
-  int32 port = 3;
-}
-
-message ConfigureRequest {
-  int32 nodenum = 1;
-  repeated node nodes = 2;
-}
-
-message ConfigureResponse {
-  bool success = 1;
+  
 }

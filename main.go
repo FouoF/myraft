@@ -9,6 +9,8 @@ import (
 	"myraft/timer"
 	"net"
 	"os"
+	"time"
+	"sync"
 
 	consistency "myraft/consistency"
 
@@ -24,15 +26,38 @@ type consistencyServer struct{
 	consistency.UnimplementedConsistencyServer
 	Nodenums int32
 	nodes []*consistency.Node
+	mutex sync.Mutex
 }
 
-func (s* consistencyServer) sendConfigure(ctx context.Context, request* consistency.ConfigureRequest) (response* consistency.ConfigureResponse, err error){
+func (s* consistencyServer) Sendconfigure(ctx context.Context, request* consistency.ConfigureRequest) (response* consistency.ConfigureResponse, err error){
+	s.mutex.Lock()
 	s.nodes = request.Nodes
 	s.Nodenums = request.Nodenum
+	s.mutex.Unlock()
 	return &consistency.ConfigureResponse{Success: true}, nil
 }
 
-func serverConfigureInit(confname string) error{
+func (s* consistencyServer) Sendheartbeat(ctx context.Context, request* consistency.HeartbeatRequest) (response* consistency.HeartbeatResponse, err error){
+	request.Term = int32(shared.GetTerm())
+	return &consistency.HeartbeatResponse{Success: true}, nil
+}
+
+func newConsistencyServer() *consistencyServer{
+	return &consistencyServer{}
+}
+
+func startHeartbeat() *mytimer.TickerWrapper{
+	Table := shared.GetstatesTable()
+	timer := mytimer.NewTickerWrapper(100 * time.Millisecond, func() {
+		for _, v := range *Table{
+			client := consistency.NewConsistencyClient(v.Conn)
+			client.Sendheartbeat(context.Background(), &consistency.HeartbeatRequest{})
+		}
+	})
+	return timer
+}
+
+func ConfigureInit(confname string) error{
 	var err error
 	if shared.Getstatus() == shared.Leader {
 		if err := shared.InitLeader(); err != nil {
@@ -57,16 +82,24 @@ func serverConfigureInit(confname string) error{
 				continue
 			}
 			client := consistency.NewConsistencyClient(conn)
-			defer conn.Close()
-			client.Sendconfigure(context.Background(), &consistency.ConfigureRequest{})
+			client.Sendconfigure(context.Background(), &configureRequest)
 			stateTable := *shared.GetstatesTable()
-			stateTable[config.Nodes[i]] = *shared.NewNodestate(true)
+			stateTable[config.Nodes[i]] = shared.Nodestate{Conn: nil, Configed: true}
 		}
 	} else {
-		lis, _ := net.Listen("tcp", ":11451")
+		lis, _ := net.Listen("tcp", fmt.Sprintf(":%d", port))
 		s := grpc.NewServer()
-		consistency.RegisterConsistencyServer(s, &consistencyServer{})
+		consistencyserver := newConsistencyServer()
+		consistency.RegisterConsistencyServer(s, consistencyserver)
 		s.Serve(lis)
+		for ;; {
+			consistencyserver.mutex.Lock()
+			if (consistencyserver.Nodenums != 0) {
+				break
+			}
+			consistencyserver.mutex.Unlock()
+			time.Sleep(100 * time.Millisecond)
+		}
 		defer s.Stop()
 	}
 	return nil
@@ -78,13 +111,13 @@ func main() {
 	} else {
 		shared.Setstatus(shared.Follower)
 	}
-	thisIp = shared.GetHostIpv4()
+//	thisIp := shared.GetHostIpv4()
 	log := asynclog.NewAsyncLogger(1024, 10)
-	inittimer := mytimer.NewTimerWrapper(1000, func() {
+	inittimer := mytimer.NewTimerWrapper(1000 * time.Millisecond, func() {
 		log.Log("init time out, process abort!")
 		os.Exit(1)
 	})
-	if err := serverConfigureInit(*configurePath); err != nil {
+	if err := ConfigureInit(*configurePath); err != nil {
 		log.Log(fmt.Sprintf("ConfigureInit error: %v", err))
 		os.Exit(1)
 	}
@@ -92,7 +125,7 @@ func main() {
 	for ;; {
 		log.Log("server start loop")
 		if (shared.Getstatus() == shared.Leader){
-			beattimer := mytimer.NewTickerWrapper()
+			go startHeartbeat()
 		}
 	}
 }
