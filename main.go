@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"math/rand"
 	"flag"
 	"fmt"
 	"myraft/asyclog"
@@ -9,10 +10,11 @@ import (
 	"myraft/timer"
 	"net"
 	"os"
-	"time"
 	"sync"
+	"time"
 
-	consistency "myraft/consistency"
+	"myraft/consistency"
+	"myraft/election"
 
 	"google.golang.org/grpc"
 )
@@ -20,7 +22,14 @@ var (
 	port = flag.Int("port", 11451, "The port to listen on for HTTP requests.")
 	role = flag.String("role", "follower", "The role of this server")
 	configurePath = flag.String("path", "", "The configure file to read")
+	stopping = false
+	statechange chan bool
 )
+
+type electionServer struct{
+	election.UnimplementedElectionServer
+	timeout *mytimer.TimerWrapper
+}
 
 type consistencyServer struct{
 	consistency.UnimplementedConsistencyServer
@@ -37,9 +46,20 @@ func (s* consistencyServer) Sendconfigure(ctx context.Context, request* consiste
 	return &consistency.ConfigureResponse{Success: true}, nil
 }
 
-func (s* consistencyServer) Sendheartbeat(ctx context.Context, request* consistency.HeartbeatRequest) (response* consistency.HeartbeatResponse, err error){
+func (s* electionServer) Sendheartbeat(ctx context.Context, request* election.HeartbeatRequest) (response* election.HeartbeatResponse, err error){
 	request.Term = int32(shared.GetTerm())
-	return &consistency.HeartbeatResponse{Success: true}, nil
+	s.timeout.Reset(150 + time.Duration(rand.Intn(100)) * time.Millisecond)
+	return &election.HeartbeatResponse{Success: true}, nil
+}
+
+func (s *electionServer) Vote(ctx context.Context, request *election.VoteRequest) (response *election.VoteResponse, err error){
+	if request.IsPre {
+		return &election.VoteResponse{VoteGranted: true}, nil
+	}
+	if (request.Term > int32(shared.GetTerm())){
+		return &election.VoteResponse{VoteGranted: false, Term: int32(shared.GetTerm())}, nil
+	}
+	return &election.VoteResponse{VoteGranted: true}, nil
 }
 
 func newConsistencyServer() *consistencyServer{
@@ -50,11 +70,53 @@ func startHeartbeat() *mytimer.TickerWrapper{
 	Table := shared.GetstatesTable()
 	timer := mytimer.NewTickerWrapper(100 * time.Millisecond, func() {
 		for _, v := range *Table{
-			client := consistency.NewConsistencyClient(v.Conn)
-			client.Sendheartbeat(context.Background(), &consistency.HeartbeatRequest{})
+			client := election.NewElectionClient(v.Conn)
+			client.Sendheartbeat(context.Background(), &election.HeartbeatRequest{})
 		}
 	})
 	return timer
+}
+
+func starttimeout(randnum int) *mytimer.TimerWrapper{
+	Table := shared.GetstatesTable()
+	var count = 1
+	timer := mytimer.NewTimerWrapper((150 + time.Duration(randnum))* time.Millisecond, func() {
+		for _, v := range *Table{
+			client := election.NewElectionClient(v.Conn)
+			response, _ := client.Vote(context.Background(), &election.VoteRequest{IsPre: true})
+			if response.GetVoteGranted(){
+				count ++
+			}
+		}
+		if count > shared.GetInstance().Nodenums / 2 {
+			shared.Setstatus(shared.Candidate)
+			statechange <- true
+		}
+	})
+	return timer
+}
+
+func startvote(){
+	Table := shared.GetstatesTable()
+	var count = 1
+		for _, v := range *Table{
+			client := election.NewElectionClient(v.Conn)
+			response, _ := client.Vote(context.Background(), &election.VoteRequest{IsPre: false, Term: int32(shared.GetTerm())})
+			if response.GetVoteGranted(){
+				count ++
+			}
+		if count > shared.GetInstance().Nodenums / 2 {
+			shared.Setstatus(shared.Leader)
+			statechange <- true
+		}else {
+			shared.Setstatus(shared.Follower)
+			statechange <- true
+		}
+	}
+}
+
+func startLogConsisitence(){
+	
 }
 
 func ConfigureInit(confname string) error{
@@ -73,6 +135,9 @@ func ConfigureInit(confname string) error{
 		var configureRequest consistency.ConfigureRequest
 		configureRequest.Nodenum = int32(config.Nodenums)
 		for i := 0; i < config.Nodenums; i++ {
+			if config.Nodes[i].Host == shared.GetHostIpv4() {
+				continue
+			}
 			configureRequest.Nodes[i].Ip = config.Nodes[i].Host
 			configureRequest.Nodes[i].Port = int32(config.Nodes[i].Port)
 		}
@@ -123,9 +188,28 @@ func main() {
 	}
 	inittimer.Stop()
 	for ;; {
-		log.Log("server start loop")
+		if (stopping) {
+			break
+		}
 		if (shared.Getstatus() == shared.Leader){
-			go startHeartbeat()
+			heartbeattimer := startHeartbeat()
+			startLogConsisitence()
+			defer heartbeattimer.Stop()
+		}else if (shared.Getstatus() == shared.Follower){
+			lis, _ := net.Listen("tcp", fmt.Sprintf(":%d", port))
+			s := grpc.NewServer()
+			randnum := rand.Intn(100)
+			electionserver := &electionServer{timeout:starttimeout(randnum)}
+			election.RegisterElectionServer(s, electionserver)
+			s.Serve(lis)
+			for ;; {
+				if (<- statechange) {
+				s.Stop()
+				break
+			}
+			}
+		}else if (shared.Getstatus() == shared.Candidate){
+			startvote()
 		}
 	}
 }

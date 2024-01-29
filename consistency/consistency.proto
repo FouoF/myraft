@@ -8,7 +8,6 @@ package consistency;
 
 service consistency {
   rpc sendconfigure (ConfigureRequest) returns (ConfigureResponse);
-  rpc sendheartbeat (HeartbeatRequest) returns (HeartbeatResponse);
 }
 
 message node {

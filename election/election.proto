@@ -7,5 +7,26 @@ option go_package = "raft/election";
 package election;
 
 service election {
+    rpc Vote (VoteRequest) returns (VoteResponse);
+    rpc sendheartbeat (HeartbeatRequest) returns (HeartbeatResponse);
+}
+
+message VoteRequest {
+    bool isPre = 1;
+    int32 nodeId = 2;
+    int32 term = 3;
+}
+
+message VoteResponse {
+    bool voteGranted = 1;
+    int32 term = 2;
+}
+
+message HeartbeatRequest {
+    string id = 1;
+    int32 term = 2;
+}
   
+message HeartbeatResponse {
+    bool success = 1;
 }

@@ -153,6 +153,8 @@ func InitStub(addr node) (*grpc.ClientConn, error){
 	return conn, nil
 }
 
+var HostIpv4 = GetHostIpv4() 
+
 func GetHostIpv4() (string) {
 	hostname, err := os.Hostname()
 	if err != nil {
